@@ -3,12 +3,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { supabase } from '@/lib/supabase';
-import { AI_SYSTEM_PROMPT } from '@/lib/constants';
+import { AI_MODES, type AiMode } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
@@ -34,6 +33,9 @@ import {
   Loader2,
   ExternalLink,
   RefreshCw,
+  Bot,
+  MessageSquare,
+  FileCode2,
 } from 'lucide-react';
 import type { ChatMessage, GeneratedFile } from '@/lib/types';
 
@@ -49,6 +51,18 @@ const DEVICE_WIDTHS: Record<Device, string> = {
   desktop: '100%',
   tablet: '768px',
   mobile: '375px',
+};
+
+const MODE_ICONS: Record<AiMode, typeof Bot> = {
+  agent: Bot,
+  chat: MessageSquare,
+  snippets: FileCode2,
+};
+
+const MODE_PLACEHOLDERS: Record<AiMode, string> = {
+  agent: 'Describe the app you want to build — e.g. "A coffee shop website with menu and contact form"',
+  chat: 'Ask for changes or ask a question about your app...',
+  snippets: 'Describe a snippet — e.g. "A collapsible accordion component" or "A loading spinner with CSS"',
 };
 
 export function Builder() {
@@ -76,6 +90,7 @@ export function Builder() {
   const [previewHtml, setPreviewHtml] = useState('');
   const [previewKey, setPreviewKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [aiMode, setAiMode] = useState<AiMode>('agent');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -120,39 +135,6 @@ export function Builder() {
         return;
       }
 
-      const userContent =
-        Object.keys(files).length > 0
-          ? `The user wants to modify their existing app. Here is the request:\n\n"${prompt}"\n\nHere are the current files:\n${Object.entries(files)
-              .map(([name, content]) => `--- FILE: ${name} ---\n${content}`)
-              .join('\n\n')}\n\nReturn the COMPLETE updated files with the requested changes applied.`
-          : `Build a complete website for this request:\n\n"${prompt}"\n\nReturn the complete index.html file.`;
-
-      const aiRes = await fetch('https://text.pollinations.ai/openai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'openai',
-          messages: [
-            { role: 'system', content: AI_SYSTEM_PROMPT },
-            { role: 'user', content: userContent },
-          ],
-          temperature: 0.7,
-          max_tokens: 16000,
-        }),
-      });
-
-      if (!aiRes.ok) {
-        const errBody = await aiRes.json().catch(() => ({}));
-        throw new Error(errBody?.error?.message || `AI request failed (${aiRes.status})`);
-      }
-
-      const aiData = await aiRes.json();
-      const rawContent: string = aiData.choices?.[0]?.message?.content ?? '';
-
-      if (!rawContent) {
-        throw new Error('The AI returned an empty response. Please try again.');
-      }
-
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: {
@@ -161,7 +143,8 @@ export function Builder() {
         },
         body: JSON.stringify({
           prompt,
-          rawContent,
+          mode: aiMode,
+          files: Object.keys(files).length > 0 ? files : undefined,
         }),
       });
 
@@ -345,11 +328,38 @@ export function Builder() {
     <div className="flex h-[calc(100vh-3.5rem)] bg-slate-950">
       {/* Chat sidebar */}
       <div className="flex w-[340px] flex-col border-r border-slate-800">
+        {/* AI Mode tabs */}
+        <div className="flex border-b border-slate-800 px-2 py-2 gap-1">
+          {AI_MODES.map((mode) => {
+            const Icon = MODE_ICONS[mode.id];
+            const isActive = aiMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                onClick={() => setAiMode(mode.id)}
+                title={mode.description}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                  isActive
+                    ? 'bg-slate-800 text-emerald-400'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {mode.label}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.length === 0 && (
             <div className="text-center text-slate-500 mt-8 px-4">
               <Sparkles className="h-8 w-8 mx-auto mb-3 text-emerald-400" />
-              <p className="text-sm">Describe the website you want to build. The AI will generate a complete, working site.</p>
+              <p className="text-sm">
+                {aiMode === 'agent' && 'Describe the app you want to build. The AI will generate a complete, working site.'}
+                {aiMode === 'chat' && 'Start a conversation. Ask the AI to build or modify your app.'}
+                {aiMode === 'snippets' && 'Describe a snippet or component you need. The AI will generate a focused, reusable piece.'}
+              </p>
             </div>
           )}
           {messages.map((m, i) => (
@@ -366,7 +376,7 @@ export function Builder() {
           ))}
           {generating && (
             <div className="flex items-center gap-2 text-slate-400 text-sm px-3">
-              <Loader2 className="h-4 w-4 animate-spin" /> Generating...
+              <Loader2 className="h-4 w-4 animate-spin" /> Generating with Gemini...
             </div>
           )}
           <div ref={messagesEndRef} />
@@ -375,7 +385,7 @@ export function Builder() {
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe your app or request changes..."
+            placeholder={MODE_PLACEHOLDERS[aiMode]}
             className="bg-slate-900 border-slate-700 text-white resize-none mb-2"
             rows={3}
             onKeyDown={(e) => {
@@ -591,7 +601,7 @@ export function Builder() {
           <DialogHeader>
             <DialogTitle>Publish your app</DialogTitle>
             <DialogDescription className="text-slate-400">
-              Publish your app to get a public live URL that anyone can view.
+              Publish your app to get a public live URL that anyone can view as a real standalone website.
             </DialogDescription>
           </DialogHeader>
           {publishedUrl ? (
@@ -603,10 +613,11 @@ export function Builder() {
                   <a href={publishedUrl} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" /></a>
                 </Button>
               </div>
+              <p className="text-xs text-slate-500">The published page shows your app as a full-screen standalone website.</p>
             </div>
           ) : (
             <p className="text-sm text-slate-400">
-              Click publish below to make your app live at a shareable URL.
+              Click publish below to make your app live at a shareable URL. It will open as a real live website, not embedded inside Experts Team.
             </p>
           )}
           <DialogFooter>

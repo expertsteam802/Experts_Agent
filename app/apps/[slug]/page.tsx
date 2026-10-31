@@ -31,13 +31,11 @@ export default async function PublicAppPage({ params }: PageProps) {
   const html = (data.files as Record<string, string>)['index.html'] ?? '';
 
   return (
-    <div className="w-screen h-screen overflow-hidden">
-      <iframe
-        srcDoc={html}
-        title={data.title}
-        className="w-full h-full border-0"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-      />
-    </div>
+    <iframe
+      srcDoc={html}
+      title={data.title}
+      className="fixed inset-0 w-full h-full border-0"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox"
+    />
   );
 }
